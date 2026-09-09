@@ -4,15 +4,15 @@
 #include "queue.h"
 
 #define NUM_QUEUES 3
-#define BOOST_INTERVAL 20
 
 typedef struct {
     Queue queues[NUM_QUEUES];
     int quantums[NUM_QUEUES];
     int current_time;
+    int boost_interval;
 } Scheduler;
 
-void initialize_scheduler(Scheduler *scheduler);
+void initialize_scheduler(Scheduler *scheduler, int boost_interval);
 
 void run_scheduler(
     Scheduler *scheduler,

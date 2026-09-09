@@ -2,7 +2,7 @@
 #define PROCESS_H
 
 typedef struct {
-    char pid[10];
+    char pid[12];
 
     int arrival_time;
     int burst_time;
