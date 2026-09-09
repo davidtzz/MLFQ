@@ -1,5 +1,56 @@
 #include "scheduler.h"
 #include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    int cycle;
+    int queue_index;
+    Process *process;
+} ScheduleEntry;
+
+static void write_table_border(FILE *file, int column_count) {
+    fprintf(file, "+----");
+
+    for (int i = 0; i < column_count; i++) {
+        fprintf(file, "+----");
+    }
+
+    fprintf(file, "+\n");
+}
+
+static void add_schedule_entry(
+    ScheduleEntry **schedule,
+    int *schedule_count,
+    int *schedule_capacity,
+    int cycle,
+    int queue_index,
+    Process *process
+) {
+    if (*schedule_count == *schedule_capacity) {
+        int new_capacity = *schedule_capacity == 0
+            ? 16
+            : *schedule_capacity * 2;
+        ScheduleEntry *new_schedule = realloc(
+            *schedule,
+            new_capacity * sizeof(ScheduleEntry)
+        );
+
+        if (new_schedule == NULL) {
+            free(*schedule);
+            *schedule = NULL;
+            *schedule_count = -1;
+            return;
+        }
+
+        *schedule = new_schedule;
+        *schedule_capacity = new_capacity;
+    }
+
+    (*schedule)[*schedule_count].cycle = cycle;
+    (*schedule)[*schedule_count].queue_index = queue_index;
+    (*schedule)[*schedule_count].process = process;
+    (*schedule_count)++;
+}
 
 static int process_is_queued(
     Scheduler *scheduler,
@@ -50,7 +101,7 @@ static void priority_boost(
     Process processes[],
     int process_count
 ) {
-    for (int i = 0; i < NUM_QUEUES; i++) {
+    for (int i = 1; i < NUM_QUEUES; i++) {
         while (!is_queue_empty(&scheduler->queues[i])) {
             Process *process = dequeue(&scheduler->queues[i]);
 
@@ -69,12 +120,13 @@ static void priority_boost(
     }
 }
 
-void initialize_scheduler(Scheduler *scheduler) {
+void initialize_scheduler(Scheduler *scheduler, int boost_interval) {
     scheduler->quantums[0] = 2;
     scheduler->quantums[1] = 4;
     scheduler->quantums[2] = 8;
 
     scheduler->current_time = 0;
+    scheduler->boost_interval = boost_interval;
 
     for (int i = 0; i < NUM_QUEUES; i++) {
         initialize_queue(&scheduler->queues[i]);
@@ -87,6 +139,9 @@ void run_scheduler(
     int process_count
 ) {
     int finished_processes = 0;
+    ScheduleEntry *schedule = NULL;
+    int schedule_count = 0;
+    int schedule_capacity = 0;
 
     while (finished_processes < process_count) {
         
@@ -97,7 +152,7 @@ void run_scheduler(
         );
 
         if (scheduler->current_time > 0 &&
-            scheduler->current_time % BOOST_INTERVAL == 0) {
+            scheduler->current_time % scheduler->boost_interval == 0) {
 
             priority_boost(
                 scheduler,
@@ -109,6 +164,18 @@ void run_scheduler(
         int queue_index = get_next_queue(scheduler);
 
         if (queue_index == -1) {
+            add_schedule_entry(
+                &schedule,
+                &schedule_count,
+                &schedule_capacity,
+                scheduler->current_time,
+                -1,
+                NULL
+            );
+            if (schedule_count == -1) {
+                printf("No se pudo guardar la tabla de ejecucion.\n");
+                return;
+            }
             scheduler->current_time++;
             continue;
         }
@@ -124,10 +191,23 @@ void run_scheduler(
 
         int quantum = scheduler->quantums[queue_index];
         int cycles = 0;
+        int boosted = 0;
 
         while (cycles < quantum &&
                process->remaining_time > 0) {
 
+            add_schedule_entry(
+                &schedule,
+                &schedule_count,
+                &schedule_capacity,
+                scheduler->current_time,
+                queue_index,
+                process
+            );
+            if (schedule_count == -1) {
+                printf("No se pudo guardar la tabla de ejecucion.\n");
+                return;
+            }
             process->remaining_time--;
             scheduler->current_time++;
             cycles++;
@@ -137,12 +217,29 @@ void run_scheduler(
                 processes,
                 process_count
             );
+
+            if (scheduler->current_time > 0 &&
+                scheduler->current_time % scheduler->boost_interval == 0) {
+                if (process->remaining_time > 0) {
+                    process->current_queue = 0;
+                    enqueue(&scheduler->queues[0], process);
+                }
+
+                priority_boost(
+                    scheduler,
+                    processes,
+                    process_count
+                );
+
+                boosted = 1;
+                break;
+            }
         }
 
         if (process->remaining_time == 0) {
             process->finish_time = scheduler->current_time;
             finished_processes++;
-        } else {
+        } else if (!boosted) {
             if (cycles == quantum &&
                 queue_index < NUM_QUEUES - 1) {
 
@@ -185,5 +282,48 @@ void run_scheduler(
 
     fclose(file);
 
-    printf("Resultados guardados en results.csv\n");
+    FILE *table_file = fopen("schedule.txt", "w");
+
+    if (table_file == NULL) {
+        printf("Resultados guardados en results.csv, pero no se pudo crear schedule.txt\n");
+        free(schedule);
+        return;
+    }
+
+    fprintf(table_file, "Tabla de distribucion de procesos\n\n");
+    write_table_border(table_file, schedule_count);
+    fprintf(table_file, "| %-2s", "Q/T");
+
+    for (int cycle = 0; cycle < schedule_count; cycle++) {
+        fprintf(table_file, "|%-4d", cycle);
+    }
+
+    fprintf(table_file, "|\n");
+    write_table_border(table_file, schedule_count);
+
+    for (int queue_index = 0; queue_index < NUM_QUEUES; queue_index++) {
+        fprintf(table_file, "| Q%d ", queue_index);
+
+        for (int cycle = 0; cycle < schedule_count; cycle++) {
+            const char *process_id = "-";
+
+            for (int i = 0; i < schedule_count; i++) {
+                if (schedule[i].cycle == cycle &&
+                    schedule[i].queue_index == queue_index) {
+                    process_id = schedule[i].process->pid;
+                    break;
+                }
+            }
+
+            fprintf(table_file, "|%-4s", process_id);
+        }
+
+        fprintf(table_file, "|\n");
+        write_table_border(table_file, schedule_count);
+    }
+
+    fclose(table_file);
+    free(schedule);
+
+    printf("Resultados guardados en results.csv y schedule.txt\n");
     }
