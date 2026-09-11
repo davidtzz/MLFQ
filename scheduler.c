@@ -1,4 +1,5 @@
 #include "scheduler.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -27,9 +28,28 @@ static void add_schedule_entry(
     Process *process
 ) {
     if (*schedule_count == *schedule_capacity) {
-        int new_capacity = *schedule_capacity == 0
-            ? 16
-            : *schedule_capacity * 2;
+        int new_capacity;
+
+        if (*schedule_capacity == 0) {
+            new_capacity = 16;
+        } else {
+            if (*schedule_capacity > INT_MAX / 2) {
+                free(*schedule);
+                *schedule = NULL;
+                *schedule_count = -1;
+                return;
+            }
+
+            new_capacity = *schedule_capacity * 2;
+        }
+
+        if (new_capacity > INT_MAX / (int)sizeof(ScheduleEntry)) {
+            free(*schedule);
+            *schedule = NULL;
+            *schedule_count = -1;
+            return;
+        }
+
         ScheduleEntry *new_schedule = realloc(
             *schedule,
             new_capacity * sizeof(ScheduleEntry)
@@ -97,10 +117,13 @@ static int get_next_queue(Scheduler *scheduler) {
 }
 
 static void priority_boost(
-    Scheduler *scheduler,
-    Process processes[],
-    int process_count
+    Scheduler *scheduler
 ) {
+    /*
+     * El boost solo mueve procesos que esperan en Q1/Q2. El proceso activo
+     * se agrega despues, para conservar el orden FIFO de los que esperaban.
+     * Asi el boost no transforma una interrupcion en una perdida de quantum.
+     */
     for (int i = 1; i < NUM_QUEUES; i++) {
         while (!is_queue_empty(&scheduler->queues[i])) {
             Process *process = dequeue(&scheduler->queues[i]);
@@ -112,15 +135,20 @@ static void priority_boost(
         }
     }
 
-    for (int i = 0; i < process_count; i++) {
-        if (processes[i].remaining_time > 0 &&
-            processes[i].arrival_time <= scheduler->current_time) {
-            processes[i].current_queue = 0;
-        }
-    }
 }
 
 void initialize_scheduler(Scheduler *scheduler, int boost_interval) {
+    /*
+     * Un quantum pequeno en Q0 mejora la respuesta de procesos nuevos, pero
+     * aumenta los cambios de contexto y hace que los procesos largos bajen
+     * antes. Por eso los quantums crecen en las colas inferiores.
+     *
+     * Si el boost es muy frecuente, los procesos casi no permanecen en Q1/Q2
+     * y el comportamiento se acerca a una ronda de alta prioridad. Si no hay
+     * boost (intervalo 0), un flujo continuo de procesos nuevos puede causar
+     * starvation en las colas inferiores; los boosts periodicos son la
+     * proteccion contra ese caso.
+     */
     scheduler->quantums[0] = 2;
     scheduler->quantums[1] = 4;
     scheduler->quantums[2] = 8;
@@ -151,13 +179,12 @@ void run_scheduler(
             process_count
         );
 
-        if (scheduler->current_time > 0 &&
+        if (scheduler->boost_interval > 0 &&
+            scheduler->current_time > 0 &&
             scheduler->current_time % scheduler->boost_interval == 0) {
 
             priority_boost(
-                scheduler,
-                processes,
-                process_count
+                scheduler
             );
         }
 
@@ -218,18 +245,17 @@ void run_scheduler(
                 process_count
             );
 
-            if (scheduler->current_time > 0 &&
+            if (scheduler->boost_interval > 0 &&
+                scheduler->current_time > 0 &&
                 scheduler->current_time % scheduler->boost_interval == 0) {
+                priority_boost(
+                    scheduler
+                );
+
                 if (process->remaining_time > 0) {
                     process->current_queue = 0;
                     enqueue(&scheduler->queues[0], process);
                 }
-
-                priority_boost(
-                    scheduler,
-                    processes,
-                    process_count
-                );
 
                 boosted = 1;
                 break;
