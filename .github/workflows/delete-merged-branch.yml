@@ -6,13 +6,17 @@ on:
     branches:
       - dev
 
+permissions:
+  contents: write
+
 jobs:
   delete-branch:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+
     steps:
       - name: Delete head branch
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             github.rest.git.deleteRef({
