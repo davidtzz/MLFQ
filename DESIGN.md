@@ -13,7 +13,7 @@ Este código divide la implemetación del scheduler por responsibilidades utiliz
  - Queue: En estos archivos tenemos el .h en que se define la entidad Cola y que nos permite crear las colas de los procesos y el .c que utiliza la estructura y crea las colas durante la simulación.
  - Scheduler: Como en los casos anteriores, tenemos los archivos .h donde se define la entidad del scheduler y el archivo .c que implementa la funcionalidad.
 
-### Patrones y/o principios
+## Patrones y/o principios
 
 ### Funciones estáticas 
 Las funciones estáticas se utilizan para evitar contaminar el espacio de nombres global y deja claro qué es API pública (scheduler.h) en contraste con detalle de la implementación.
@@ -24,7 +24,9 @@ En este proyecto se realiza una verficación sobre ``realloc`` y ``fopen``. En e
 En el caso de ``fopen`` devuelve NULL si no pudo abrir/crear el archivo (por ejemplo, sin permisos de escritura en el directorio, o disco lleno). El patrón es simple: revisar inmediatamente si el puntero es NULL antes de usarlo. Si intentaras usar file sin este chequeo y fopen hubiera fallado, cualquier fprintf(file, ...) posterior causaría comportamiento indefinido (probablemente un crash).
 
 ### DRY
-En este proyecto no hay código duplicado lo que representa una aplicación del principio Don't Repeat Yourself
+En este proyecto no hay código duplicado lo que representa una aplicación del principio Don't Repeat Yourself.
+
+
 
 ## Esquema del proyecto
 
